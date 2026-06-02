@@ -63,6 +63,18 @@ class _TicTacToePageState extends State<TicTacToePage> {
   bool _onlineMode = false;
   bool _eloUpdated = false;
 
+  // Match state
+  String? _opponent;
+  int _opponentRating = 1200;
+  DateTime? _matchStartTime;
+  DateTime? _waitTimeoutTime;
+  Timer? _waitTimer;
+  int _secondsUntilTimeout = 30;
+  bool _isWaiting = false;
+  bool _isConnecting = false;
+  String _connectionStatus = 'Offline';
+  int _lastMoveTimestamp = 0;
+
   void reset() {
     setState(() {
       board = List.filled(9, '');
@@ -198,10 +210,34 @@ class _TicTacToePageState extends State<TicTacToePage> {
     if (board[i] != '') return;
     if (_onlineMode) {
       // Only allow moves when it's this player's turn
-      if (_symbol == null || current != _symbol) return;
-      // Push move to Firebase
+      if (_symbol == null || current != _symbol) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Not your turn')),
+        );
+        return;
+      }
+
+      // Rate limit moves (prevent spam)
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastMoveTimestamp < 500) {
+        return;
+      }
+      _lastMoveTimestamp = now;
+
+      // Validate move locally
       final updated = List<String>.from(board);
       updated[i] = _symbol!;
+
+      // Ensure no more than one move per turn
+      final xCount = updated.where((e) => e == 'X').length;
+      final oCount = updated.where((e) => e == 'O').length;
+      if (xCount < oCount || xCount > oCount + 1) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid move sequence')),
+        );
+        return;
+      }
+
       final winner = _computeWinnerFromList(updated);
       final next = _symbol == 'X' ? 'O' : 'X';
       final updates = {
@@ -209,7 +245,8 @@ class _TicTacToePageState extends State<TicTacToePage> {
         'current': winner == null ? next : '',
         'status': winner == null
             ? '$next to move'
-            : (winner == 'Draw' ? 'Draw' : '$winner wins')
+            : (winner == 'Draw' ? 'Draw' : '$winner wins'),
+        'lastMoveTime': ServerValue.timestamp,
       };
       _matchRef?.update(updates);
     } else {
@@ -361,6 +398,71 @@ class _TicTacToePageState extends State<TicTacToePage> {
               ),
             ),
             const SizedBox(height: 16),
+            if (_onlineMode) ...[
+              Card(
+                color: Colors.grey.shade900,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('You ($_symbol)',
+                                  style:
+                                      Theme.of(context).textTheme.titleSmall),
+                              Text('Rating: ${_opponentRating}'),
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                  _opponent != null
+                                      ? 'vs ${_opponent!.substring(0, 8)}...'
+                                      : 'vs Opponent',
+                                  style:
+                                      Theme.of(context).textTheme.titleSmall),
+                              Text('Rating: $_opponentRating'),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Chip(
+                            label: Text(_connectionStatus),
+                            backgroundColor: _connectionStatus == 'Connected'
+                                ? Colors.green
+                                : _connectionStatus == 'Waiting for opponent...'
+                                    ? Colors.orange
+                                    : Colors.red,
+                          ),
+                          if (_isWaiting)
+                            Chip(
+                              label: Text('$_secondsUntilTimeout s'),
+                              backgroundColor: Colors.orange.shade700,
+                            ),
+                          if (_matchStartTime != null)
+                            Chip(
+                              label: Text(
+                                  'Match: ${DateTime.now().difference(_matchStartTime!).inMinutes}m'),
+                              backgroundColor: Colors.blue,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             AspectRatio(
               aspectRatio: 1,
               child: GridView.builder(
@@ -372,11 +474,23 @@ class _TicTacToePageState extends State<TicTacToePage> {
                   child: Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
-                      color: Colors.blue.shade50,
+                      color: board[i].isEmpty
+                          ? Colors.blue.shade50
+                          : (board[i] == 'X'
+                              ? Colors.blue.shade100
+                              : Colors.orange.shade100),
                     ),
                     child: Center(
-                      child:
-                          Text(board[i], style: const TextStyle(fontSize: 48)),
+                      child: Text(
+                        board[i],
+                        style: TextStyle(
+                          fontSize: 48,
+                          color: board[i] == 'X'
+                              ? Colors.blue
+                              : (board[i] == 'O' ? Colors.orange : null),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -400,20 +514,38 @@ class _TicTacToePageState extends State<TicTacToePage> {
             const SizedBox(height: 12),
             const Divider(),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                      onPressed: _startMatchmaking,
-                      child: Text(_onlineMode
-                          ? 'In Match $_matchId'
-                          : 'Find Match (Firebase)')),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                    onPressed: _leaveMatch, child: const Text('Leave')),
-              ],
-            )
+            if (!_onlineMode) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                        onPressed: _isConnecting ? null : _startMatchmaking,
+                        child: Text(_isConnecting
+                            ? 'Connecting...'
+                            : 'Find Match (Firebase)')),
+                  ),
+                ],
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: gameOver ? _startMatchmaking : null,
+                      child: const Text('Play Again'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _leaveMatch,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    child: const Text('Leave Game'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -422,94 +554,145 @@ class _TicTacToePageState extends State<TicTacToePage> {
 
   Future<void> _startMatchmaking() async {
     await _ensureSignedIn();
-    // Hardened matchmaking: transactionally join waiting matches using ELO and timeouts
-    final myRating = await _getMyRating();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final waitingSnap = await _db
-        .child('matches')
-        .orderByChild('status')
-        .equalTo('waiting')
-        .get();
-    bool joined = false;
-    if (waitingSnap.exists) {
-      for (final child in waitingSnap.children) {
-        final key = child.key;
-        if (key == null) continue;
-        final data = child.value as Map<dynamic, dynamic>?;
-        if (data == null) continue;
-        // check expiry
-        final expires = (data['expiresAt'] as int?) ?? 0;
-        if (expires < now) {
-          // stale - try to remove it (creator may have left)
-          try {
-            await _db.child('matches/$key').remove();
-          } catch (_) {}
-          continue;
-        }
-        final p1Rating = (data['player1_rating'] is int)
-            ? data['player1_rating'] as int
-            : (data['player1_rating'] is double)
-                ? (data['player1_rating'] as double).toInt()
-                : 1200;
-        // ELO window (±200)
-        if ((p1Rating - myRating).abs() > 200) continue;
+    setState(() {
+      _isConnecting = true;
+      _connectionStatus = 'Connecting...';
+    });
 
-        final ref = _db.child('matches/$key');
-        // transactional join
-        try {
-          final result = await ref.runTransaction((mutableData) {
-            final md = mutableData as dynamic;
-            if (md == null) return Transaction.abort();
-            final cur = md.value as Map<dynamic, dynamic>?;
-            if (cur == null) return Transaction.abort();
-            if (cur['player2'] != null) return Transaction.abort();
-            final ex = (cur['expiresAt'] as int?) ?? 0;
-            if (ex < DateTime.now().millisecondsSinceEpoch)
-              return Transaction.abort();
-            cur['player2'] = _uid;
-            cur['player2_rating'] = myRating;
-            cur['status'] = 'playing';
-            md.value = cur;
-            return Transaction.success(md);
-          });
-          if (result.committed == true) {
-            // joined successfully
-            _matchRef = ref;
-            _matchId = key;
-            _symbol = 'O';
-            _onlineMode = true;
-            _listenMatch();
-            joined = true;
-            break;
+    try {
+      // Hardened matchmaking: transactionally join waiting matches using ELO and timeouts
+      final myRating = await _getMyRating();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final waitingSnap = await _db
+          .child('matches')
+          .orderByChild('status')
+          .equalTo('waiting')
+          .get();
+      bool joined = false;
+      if (waitingSnap.exists) {
+        for (final child in waitingSnap.children) {
+          final key = child.key;
+          if (key == null) continue;
+          final data = child.value as Map<dynamic, dynamic>?;
+          if (data == null) continue;
+          // check expiry
+          final expires = (data['expiresAt'] as int?) ?? 0;
+          if (expires < now) {
+            // stale - try to remove it (creator may have left)
+            try {
+              await _db.child('matches/$key').remove();
+            } catch (_) {}
+            continue;
           }
-        } catch (e) {
-          // transaction failed or aborted, try next candidate
-          continue;
+          final p1Rating = (data['player1_rating'] is int)
+              ? data['player1_rating'] as int
+              : (data['player1_rating'] is double)
+                  ? (data['player1_rating'] as double).toInt()
+                  : 1200;
+          // ELO window (±200)
+          if ((p1Rating - myRating).abs() > 200) continue;
+
+          final ref = _db.child('matches/$key');
+          // transactional join
+          try {
+            final result = await ref.runTransaction((mutableData) {
+              final md = mutableData as dynamic;
+              if (md == null) return Transaction.abort();
+              final cur = md.value as Map<dynamic, dynamic>?;
+              if (cur == null) return Transaction.abort();
+              if (cur['player2'] != null) return Transaction.abort();
+              final ex = (cur['expiresAt'] as int?) ?? 0;
+              if (ex < DateTime.now().millisecondsSinceEpoch)
+                return Transaction.abort();
+              cur['player2'] = _uid;
+              cur['player2_rating'] = myRating;
+              cur['status'] = 'playing';
+              cur['matchStartTime'] = ServerValue.timestamp;
+              md.value = cur;
+              return Transaction.success(md);
+            });
+            if (result.committed == true) {
+              // joined successfully
+              _matchRef = ref;
+              _matchId = key;
+              _symbol = 'O';
+              _opponent = data['player1'] as String?;
+              _opponentRating = p1Rating;
+              _onlineMode = true;
+              _isConnecting = false;
+              _connectionStatus = 'Connected';
+              _listenMatch();
+              _startWaitTimeout();
+              joined = true;
+              break;
+            }
+          } catch (e) {
+            // transaction failed or aborted, try next candidate
+            continue;
+          }
         }
       }
-    }
-    if (!joined) {
-      // create new match with expiry (timeout)
-      final ref = _db.child('matches').push();
-      final ttl = 30 * 1000; // 30 seconds
-      final matchData = {
-        'player1': _uid,
-        'player1_rating': myRating,
-        'player2': null,
-        'board': List.filled(9, ''),
-        'current': 'X',
-        'status': 'waiting',
-        'createdAt': now,
-        'expiresAt': now + ttl,
-      };
-      await ref.set(matchData);
-      _matchRef = ref;
-      _matchId = ref.key;
-      _symbol = 'X';
-      _onlineMode = true;
-      _listenMatch();
+      if (!joined) {
+        // create new match with expiry (timeout)
+        final ref = _db.child('matches').push();
+        final ttl = 30 * 1000; // 30 seconds
+        final matchData = {
+          'player1': _uid,
+          'player1_rating': myRating,
+          'player2': null,
+          'board': List.filled(9, ''),
+          'current': 'X',
+          'status': 'waiting',
+          'createdAt': now,
+          'expiresAt': now + ttl,
+        };
+        await ref.set(matchData);
+        _matchRef = ref;
+        _matchId = ref.key;
+        _symbol = 'X';
+        _onlineMode = true;
+        _isWaiting = true;
+        _isConnecting = false;
+        _connectionStatus = 'Waiting for opponent...';
+        _waitTimeoutTime = DateTime.now().add(const Duration(seconds: 30));
+        _startWaitCountdown();
+        _listenMatch();
+      }
+    } catch (e) {
+      setState(() {
+        _isConnecting = false;
+        _connectionStatus = 'Connection failed';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Matchmaking error: $e')),
+      );
     }
     setState(() {});
+  }
+
+  void _startWaitCountdown() {
+    _waitTimer?.cancel();
+    _waitTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final remaining =
+          _waitTimeoutTime?.difference(DateTime.now()).inSeconds ?? 0;
+      if (remaining <= 0) {
+        timer.cancel();
+        _leaveMatch();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Match timeout - no opponent found')),
+        );
+      } else {
+        setState(() => _secondsUntilTimeout = remaining);
+      }
+    });
+  }
+
+  void _startWaitTimeout() {
+    _waitTimer?.cancel();
   }
 
   void _listenMatch() {
@@ -522,20 +705,42 @@ class _TicTacToePageState extends State<TicTacToePage> {
               List.filled(9, '');
       final cur = val['current'] as String? ?? '';
       final stat = val['status'] as String? ?? '';
+
+      // Extract opponent info if not set
+      if (_symbol == 'O' && _opponent == null) {
+        _opponent = val['player1'] as String?;
+      } else if (_symbol == 'X' && _opponent == null) {
+        _opponent = val['player2'] as String?;
+      }
+
+      // Extract match start time
+      if (_matchStartTime == null && val['matchStartTime'] != null) {
+        final timestamp = val['matchStartTime'] as int?;
+        if (timestamp != null) {
+          _matchStartTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        }
+      }
+
       setState(() {
         board = b;
         current = cur == '' ? current : cur;
         status = stat == '' ? status : stat;
         gameOver = stat.contains('wins') || stat == 'Draw';
+
+        if (stat == 'waiting') {
+          _connectionStatus = 'Waiting for opponent...';
+        } else if (stat == 'playing') {
+          _isWaiting = false;
+          _connectionStatus = 'In game';
+        } else if (stat.contains('wins') || stat == 'Draw') {
+          _connectionStatus = 'Match finished';
+        }
       });
       // If match finished and we haven't applied ELO, do it once
       if (gameOver &&
           !_eloUpdated &&
           (stat == 'Draw' || stat.contains('wins'))) {
         _handleMatchEnd(val);
-      }
-      if (stat == 'waiting') {
-        // still waiting for opponent
       }
     });
   }
@@ -614,23 +819,33 @@ class _TicTacToePageState extends State<TicTacToePage> {
 
   Future<void> _leaveMatch() async {
     _matchSub?.cancel();
-    if (_matchRef != null && _symbol == 'X') {
-      // if creator leaves, remove the match
-      await _matchRef!.remove();
-    } else if (_matchRef != null) {
-      // if joining player leaves, clear player2
-      await _matchRef!.update({'player2': null, 'status': 'waiting'});
+    _waitTimer?.cancel();
+    try {
+      if (_matchRef != null && _symbol == 'X') {
+        // if creator leaves, remove the match
+        await _matchRef!.remove();
+      } else if (_matchRef != null) {
+        // if joining player leaves, clear player2
+        await _matchRef!.update({'player2': null, 'status': 'waiting'});
+      }
+    } catch (e) {
+      // Gracefully handle removal failures
     }
     _matchRef = null;
     _matchId = null;
     _symbol = null;
+    _opponent = null;
     _onlineMode = false;
+    _isWaiting = false;
+    _matchStartTime = null;
+    _connectionStatus = 'Offline';
     setState(() {});
   }
 
   @override
   void dispose() {
     _matchSub?.cancel();
+    _waitTimer?.cancel();
     _recipientController.dispose();
     _amountController.dispose();
     super.dispose();
