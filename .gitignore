@@ -2,6 +2,11 @@
 node_modules/
 **/node_modules/
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Flutter/Dart
 .dart_tool/
 .packages
