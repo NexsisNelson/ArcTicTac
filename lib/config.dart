@@ -1,11 +1,11 @@
 const String arcRpcUrl = String.fromEnvironment(
   'ARC_RPC_URL',
-  defaultValue: 'https://YOUR_ARC_TESTNET_RPC_URL',
+  defaultValue: 'https://rpc.testnet.arc.network',
 );
 
 const String usdcTokenAddress = String.fromEnvironment(
   'USDC_TOKEN_ADDRESS',
-  defaultValue: '0x0000000000000000000000000000000000000000',
+  defaultValue: '0x6615D7d7865bF00a8FED65d7FB24429078Aa82C4',
 );
 
 const String escrowContractAddress = String.fromEnvironment(

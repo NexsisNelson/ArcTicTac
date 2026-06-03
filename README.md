@@ -69,8 +69,8 @@ flutter run
 | Field | Value |
 |-------|-------|
 | Network Name | Arc Testnet |
-| RPC URL | https://testnet.rpc.arc.io |
-| Chain ID | 42 |
+| RPC URL | https://rpc.testnet.arc.network |
+| Chain ID | 5042002 |
 | Currency | ETH |
 | Block Explorer | https://testnet.explorer.arc.io |
 
@@ -101,15 +101,42 @@ See **[contracts/ARC_ESCROW_DEPLOYMENT.md](contracts/ARC_ESCROW_DEPLOYMENT.md)**
 
 ### 4. **Configure Flutter App**
 
-Create or update `lib/config.dart`:
+The app now reads chain configuration from `lib/config.dart` and supports build-time injection with `--dart-define`.
+
+Create or update `lib/config.dart` with your runtime values:
 
 ```dart
-const String arcRpcUrl = 'https://testnet.rpc.arc.io';
-const String escrowContractAddress = '0x1234567890123456789012345678901234567890'; // From Remix
-const String usdcTokenAddress = '0x0000000000000000000000000000000000000001'; // Arc testnet USDC
-const int minBetUsdc = 1;
-const int maxBetUsdc = 1000;
-const int feeBps = 200; // 2%
+const String arcRpcUrl = String.fromEnvironment(
+  'ARC_RPC_URL',
+  defaultValue: 'https://rpc.testnet.arc.network',
+);
+const String escrowContractAddress = String.fromEnvironment(
+  'ESCROW_CONTRACT_ADDRESS',
+  defaultValue: '0xA1a7A4Aa5EF92ca0390dD46D38e527a3CE020Cf3',
+);
+const String usdcTokenAddress = String.fromEnvironment(
+  'USDC_TOKEN_ADDRESS',
+  defaultValue: '0x6615D7d7865bF00a8FED65d7FB24429078Aa82C4',
+);
+```
+
+For deployment and local use, you can set values in a root `.env` file and use the deploy script from `contracts/`.
+
+Then run or build Flutter with `--dart-define`:
+
+```bash
+flutter run --dart-define=ARC_RPC_URL=https://rpc.testnet.arc.network \
+  --dart-define=ESCROW_CONTRACT_ADDRESS=0xA1a7A4Aa5EF92ca0390dD46D38e527a3CE020Cf3 \
+  --dart-define=USDC_TOKEN_ADDRESS=0x6615D7d7865bF00a8FED65d7FB24429078Aa82C4
+```
+
+For a production release build:
+
+```bash
+flutter build apk --release \
+  --dart-define=ARC_RPC_URL=https://rpc.testnet.arc.network \
+  --dart-define=ESCROW_CONTRACT_ADDRESS=0xA1a7A4Aa5EF92ca0390dD46D38e527a3CE020Cf3 \
+  --dart-define=USDC_TOKEN_ADDRESS=0x6615D7d7865bF00a8FED65d7FB24429078Aa82C4
 ```
 
 ---
@@ -226,12 +253,12 @@ documentation/
 
 ```env
 # Arc Testnet
-ARC_RPC_URL=https://testnet.rpc.arc.io
-ARC_CHAIN_ID=42
+ARC_RPC_URL=https://rpc.testnet.arc.network
+ARC_CHAIN_ID=5042002
 
 # Contracts
-ESCROW_CONTRACT_ADDRESS=0x...
-USDC_TOKEN_ADDRESS=0x...
+ESCROW_CONTRACT_ADDRESS=0xA1a7A4Aa5EF92ca0390dD46D38e527a3CE020Cf3
+USDC_TOKEN_ADDRESS=0x6615D7d7865bF00a8FED65d7FB24429078Aa82C4
 
 # Operator (Cloud Function signer - keep private!)
 OPERATOR_PRIVATE_KEY=0x...
