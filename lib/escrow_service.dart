@@ -238,6 +238,67 @@ class EscrowService {
     }
   }
 
+  /// Wait for a transaction receipt and return it (or null if timeout)
+  Future<TransactionReceipt?> waitForTransactionReceipt(String txHash,
+      {Duration timeout = const Duration(minutes: 5),
+      Duration pollInterval = const Duration(seconds: 3)}) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      final receipt = await _client.getTransactionReceipt(txHash);
+      if (receipt != null) return receipt;
+      await Future.delayed(pollInterval);
+    }
+    return null;
+  }
+
+  /// Wait for Created event's matchId emitted by a transaction
+  Future<BigInt?> waitForMatchIdFromTx(String txHash,
+      {Duration timeout = const Duration(minutes: 5),
+      Duration pollInterval = const Duration(seconds: 3)}) async {
+    // Event signature for Created(uint256,address,address,uint256)
+    final eventSig = bytesToHex(
+      keccakUtf8('Created(uint256,address,address,uint256)'),
+      include0x: true,
+    );
+
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      final receipt = await _client.getTransactionReceipt(txHash);
+      if (receipt != null) {
+        for (final log in receipt.logs) {
+          try {
+            final topics = log.topics;
+            if (topics != null && topics.isNotEmpty) {
+              final topic0 = topics[0].toString();
+              if (topic0.toLowerCase() == eventSig.toLowerCase()) {
+                if (topics.length > 1) {
+                  final topic1 = topics[1].toString();
+                  final hex =
+                      topic1.startsWith('0x') ? topic1.substring(2) : topic1;
+                  final matchId = BigInt.parse(hex, radix: 16);
+                  return matchId;
+                }
+                // fallback: decode from non-indexed data
+                final data = log.data ?? '';
+                if (data.isNotEmpty) {
+                  final hex = data.startsWith('0x') ? data.substring(2) : data;
+                  if (hex.length >= 64) {
+                    final first32 = hex.substring(0, 64);
+                    final matchId = BigInt.parse(first32, radix: 16);
+                    return matchId;
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        return null;
+      }
+      await Future.delayed(pollInterval);
+    }
+    throw Exception('Timeout waiting for transaction receipt');
+  }
+
   /// Get current gas price on Arc network
   Future<BigInt> getGasPrice() async {
     try {

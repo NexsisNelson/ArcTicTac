@@ -1,0 +1,13 @@
+{
+  "name": "tictactoe-escrow-contract",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "hardhat": "^2.16.0"
+  },
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile"
+  }
+}
