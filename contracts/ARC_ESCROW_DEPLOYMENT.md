@@ -112,37 +112,30 @@ TicTacToeEscrow
 
 ### Option B: Using Hardhat (Recommended for Production)
 
+The repository already includes a deployment script at `contracts/scripts/deploy.js`.
+The script will automatically load a root `.env` file when present.
+
 ```bash
-# Create hardhat project
-npx hardhat init
+cd contracts
+npm install
 
-# Install Arc plugin
-npm install @arc-network/hardhat-plugin
+export ARC_RPC_URL=https://testnet.rpc.arc.io
+export ARC_CHAIN_ID=42
+export DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+export OPERATOR_ADDRESS=0xYOUR_OPERATOR_ADDRESS
+export TREASURY_ADDRESS=0xYOUR_TREASURY_ADDRESS
+export FEE_BPS=200
 
-# Create deploy script (scripts/deploy.js)
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  const operatorAddress = "0x..."; // Cloud Function signer
-  const treasuryAddress = deployer.address;
-  const feeBps = 200; // 2%
-
-  const TicTacToeEscrow = await ethers.getContractFactory("TicTacToeEscrow");
-  const escrow = await TicTacToeEscrow.deploy(
-    operatorAddress,
-    treasuryAddress,
-    feeBps
-  );
-  
-  await escrow.deployed();
-  console.log("Escrow deployed to:", escrow.address);
-}
-
-main().catch(console.error);
-
-# Deploy
-npx hardhat run scripts/deploy.js --network arc-testnet
+npx hardhat run scripts/deploy.js --network arc
 ```
 
+The script will deploy `TicTacToeEscrow` with these constructor args:
+- `_operator` — operator account that resolves matches
+- `_treasury` — fee recipient
+- `_feeBps` — fee in basis points (max 500 / 5%)
+
+After deployment, save the returned escrow contract address and use it in Flutter via `ESCROW_CONTRACT_ADDRESS`.
+```
 ### Deployment Output Example
 
 ```

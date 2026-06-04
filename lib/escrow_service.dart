@@ -1,6 +1,6 @@
+import 'package:web3dart/crypto.dart';
 import 'package:web3dart/web3dart.dart';
 import 'package:http/http.dart';
-import 'dart:typed_data';
 
 /// Service for interacting with Arc TicTacToeEscrow smart contract
 class EscrowService {
@@ -71,7 +71,7 @@ class EscrowService {
         maxGas: 300000,
       );
 
-      final credentials = EthereumPrivateKey.fromHex(senderPrivateKey);
+      final credentials = EthPrivateKey.fromHex(senderPrivateKey);
       final txHash = await _client.sendTransaction(
         credentials,
         transaction,
@@ -102,7 +102,7 @@ class EscrowService {
         maxGas: 100000,
       );
 
-      final credentials = EthereumPrivateKey.fromHex(senderPrivateKey);
+      final credentials = EthPrivateKey.fromHex(senderPrivateKey);
       final txHash = await _client.sendTransaction(
         credentials,
         transaction,
@@ -130,7 +130,7 @@ class EscrowService {
         maxGas: 200000,
       );
 
-      final credentials = EthereumPrivateKey.fromHex(senderPrivateKey);
+      final credentials = EthPrivateKey.fromHex(senderPrivateKey);
       final txHash = await _client.sendTransaction(
         credentials,
         transaction,
@@ -302,7 +302,8 @@ class EscrowService {
   /// Get current gas price on Arc network
   Future<BigInt> getGasPrice() async {
     try {
-      return await _client.getGasPrice();
+      final gasPrice = await _client.getGasPrice();
+      return gasPrice.getInWei;
     } catch (e) {
       throw Exception('Failed to get gas price: $e');
     }

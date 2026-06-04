@@ -98,7 +98,24 @@ See **[contracts/ARC_ESCROW_DEPLOYMENT.md](contracts/ARC_ESCROW_DEPLOYMENT.md)**
    - _feeBps: 200 (2%)
 7. Save contract address (needed in Flutter config)
 ```
+### 3.1 **Deploy with Hardhat**
 
+This repo includes a ready-to-use Hardhat deployment script under `contracts/scripts/deploy.js`.
+
+1. Copy `.env.example` to `.env` and fill in the values.
+2. Run:
+
+```bash
+cd contracts
+npm install
+npm run deploy:arc
+```
+
+3. Copy the printed contract address to `lib/config.dart` or pass it at runtime with:
+
+```bash
+flutter run --dart-define=ESCROW_CONTRACT_ADDRESS=0xYourDeployedAddress
+```
 ### 4. **Configure Flutter App**
 
 The app now reads chain configuration from `lib/config.dart` and supports build-time injection with `--dart-define`.

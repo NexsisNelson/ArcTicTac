@@ -10,5 +10,5 @@ const String usdcTokenAddress = String.fromEnvironment(
 
 const String escrowContractAddress = String.fromEnvironment(
   'ESCROW_CONTRACT_ADDRESS',
-  defaultValue: '0xA1a7A4Aa5EF92ca0390dD46D38e527a3CE020Cf3',
+  defaultValue: '0x25b088219f1B1e7F795Df299f1218A3999D7509d',
 );

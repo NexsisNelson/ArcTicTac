@@ -71,7 +71,7 @@ class _BetFlowPageState extends State<BetFlowPage> {
     final whole = int.tryParse(parts[0]) ?? 0;
     int frac = 0;
     if (parts.length > 1) {
-      final f = (parts[1] + '000000').substring(0, 6);
+      final f = ('${parts[1]}000000').substring(0, 6);
       frac = int.tryParse(f) ?? 0;
     }
     return BigInt.from(whole) * BigInt.from(1000000) + BigInt.from(frac);
@@ -88,15 +88,33 @@ class _BetFlowPageState extends State<BetFlowPage> {
     setState(() => _loading = true);
     try {
       final tx = await widget.walletService.approveToken(escrowAddr, amount);
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Approve tx: $tx')));
       await Future.delayed(const Duration(seconds: 2));
       await _refreshBalances();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Approve failed: $e')));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _buyUsdc() async {
+    setState(() => _loading = true);
+    try {
+      await widget.walletService.buyUsdc();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Opened Arc testnet faucet for USDC')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Buy USDC failed: $e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -124,9 +142,11 @@ class _BetFlowPageState extends State<BetFlowPage> {
         final approvalTx =
             await widget.walletService.approveTokenIfNeeded(escrowAddr, amount);
         if (approvalTx != null) {
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Approval tx: $approvalTx')));
           await Future.delayed(const Duration(seconds: 2));
+          if (!mounted) return;
           await _refreshBalances();
         }
       }
@@ -139,6 +159,7 @@ class _BetFlowPageState extends State<BetFlowPage> {
       );
       final txHash = result['txHash'] as String?;
       final matchId = result['matchId'] as BigInt?;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
               'createMatch tx: ${txHash ?? 'unknown'}; matchId: ${matchId?.toString() ?? 'pending'}')));
@@ -157,18 +178,21 @@ class _BetFlowPageState extends State<BetFlowPage> {
             'expiresAt': expiresAt.toString(),
             'escrowTxHash': txHash,
           });
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Firebase match record created')));
         } catch (e) {
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Firebase create failed: $e')));
         }
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Create failed: $e')));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -194,9 +218,11 @@ class _BetFlowPageState extends State<BetFlowPage> {
         final approvalTx =
             await widget.walletService.approveTokenIfNeeded(escrowAddr, amount);
         if (approvalTx != null) {
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Approval tx: $approvalTx')));
           await Future.delayed(const Duration(seconds: 2));
+          if (!mounted) return;
           await _refreshBalances();
         }
       }
@@ -205,6 +231,7 @@ class _BetFlowPageState extends State<BetFlowPage> {
           await widget.walletService.depositOnchain(matchId: matchId);
       final txHash = result['txHash'] as String?;
       final status = result['status'] as bool?;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('deposit tx: ${txHash ?? 'unknown'}')));
 
@@ -219,19 +246,22 @@ class _BetFlowPageState extends State<BetFlowPage> {
               .child('onchainDeposits')
               .child(account)
               .set({'txHash': txHash, 'confirmedAt': ServerValue.timestamp});
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Deposit confirmed and recorded')));
         } catch (e) {
+          if (!mounted) return;
           // ignore firebase write errors but log
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Failed to update Firebase: $e')));
         }
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Deposit failed: $e')));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -273,7 +303,8 @@ class _BetFlowPageState extends State<BetFlowPage> {
             const SizedBox(height: 12),
             TextField(
                 controller: _amountController,
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 decoration:
                     const InputDecoration(labelText: 'Bet amount (USDC)')),
             TextField(
@@ -281,12 +312,28 @@ class _BetFlowPageState extends State<BetFlowPage> {
                 decoration: const InputDecoration(
                     labelText: 'Opponent address (optional)')),
             const SizedBox(height: 8),
+            const Text(
+              'Use the on-chain betting flow to create a match and deposit USDC. If you need test USDC, open the faucet first.',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+            const SizedBox(height: 8),
             Row(children: [
-              ElevatedButton(
-                  onPressed: _approve, child: const Text('Approve USDC')),
+              Expanded(
+                child: ElevatedButton(
+                    onPressed: _approve, child: const Text('Approve USDC')),
+              ),
               const SizedBox(width: 8),
-              ElevatedButton(
-                  onPressed: _createMatch, child: const Text('Create Match')),
+              Expanded(
+                child: ElevatedButton(
+                    onPressed: _buyUsdc, child: const Text('Buy USDC')),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: ElevatedButton(
+                    onPressed: _createMatch, child: const Text('Create Match')),
+              ),
             ]),
             const Divider(height: 24),
             TextField(

@@ -1,7 +1,4 @@
-import 'dart:typed_data';
-
 import 'package:web3dart/web3dart.dart';
-import 'package:web3dart/crypto.dart';
 import 'wallet_service.dart';
 
 const String _escrowAbi = '''[
@@ -28,8 +25,8 @@ extension WalletEscrowHelpers on WalletService {
       amount,
       expiresAt,
     ]);
-    final txHash =
-        await _sendTx(to: EthereumAddress.fromHex(escrowAddress!), data: data);
+    final txHash = await sendTransaction(
+        to: EthereumAddress.fromHex(escrowAddress!), data: data);
     // Poll receipt and attempt to decode matchId from Created event
     BigInt? matchId;
     try {
@@ -48,8 +45,8 @@ extension WalletEscrowHelpers on WalletService {
         DeployedContract(abi, EthereumAddress.fromHex(escrowAddress!));
     final fn = contract.function('deposit');
     final data = fn.encodeCall([matchId]);
-    final txHash =
-        await _sendTx(to: EthereumAddress.fromHex(escrowAddress!), data: data);
+    final txHash = await sendTransaction(
+        to: EthereumAddress.fromHex(escrowAddress!), data: data);
 
     // Wait for confirmation and return status
     final receipt = await waitForTransactionReceipt(txHash);

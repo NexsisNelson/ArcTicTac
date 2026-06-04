@@ -5,6 +5,8 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
     "target": "es2019",
     "lib": ["es2019"],
     "outDir": "lib",

@@ -99,7 +99,8 @@ class WalletService {
     final approveFn = contract.function('approve');
     final data =
         approveFn.encodeCall([EthereumAddress.fromHex(spender), amount]);
-    return await _sendTx(to: EthereumAddress.fromHex(usdcAddress), data: data);
+    return await sendTransaction(
+        to: EthereumAddress.fromHex(usdcAddress), data: data);
   }
 
   Future<String?> approveTokenIfNeeded(String spender, BigInt amount) async {
@@ -109,6 +110,18 @@ class WalletService {
     }
 
     return await approveToken(spender, amount);
+  }
+
+  Future<void> buyUsdc() async {
+    final faucetUrl = account != null
+        ? 'https://testnet-faucet.arc.io/?address=${account!.hex}'
+        : 'https://testnet-faucet.arc.io';
+    final faucetUri = Uri.parse(faucetUrl);
+    if (await canLaunchUrl(faucetUri)) {
+      await launchUrl(faucetUri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    throw Exception('Could not launch USDC faucet URL');
   }
 
   Future<int> getTokenDecimals() async {
@@ -137,7 +150,8 @@ class WalletService {
     final transferFn = contract.function('transfer');
     final data =
         transferFn.encodeCall([EthereumAddress.fromHex(recipient), amount]);
-    return await _sendTx(to: EthereumAddress.fromHex(usdcAddress), data: data);
+    return await sendTransaction(
+        to: EthereumAddress.fromHex(usdcAddress), data: data);
   }
 
   DeployedContract _erc20Contract() {
@@ -151,7 +165,7 @@ class WalletService {
     return DeployedContract(abi, EthereumAddress.fromHex(escrowAddress!));
   }
 
-  Future<String> _sendTx(
+  Future<String> sendTransaction(
       {required EthereumAddress to, required Uint8List data}) async {
     final from = account;
     if (from == null) throw Exception('Wallet not connected');

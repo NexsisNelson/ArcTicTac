@@ -6,11 +6,20 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
+import 'config.dart';
+import 'escrow_service.dart';
+import 'screens/bet_flow.dart';
 import 'wallet_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    // If Firebase isn't configured (e.g. running locally without Android/iOS config),
+    // log the error and continue so the app can run in a degraded mode.
+    debugPrint('Firebase.initializeApp() failed: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -34,16 +43,13 @@ class TicTacToePage extends StatefulWidget {
   State<TicTacToePage> createState() => _TicTacToePageState();
 }
 
-const arcRpcUrl = 'https://YOUR_ARC_TESTNET_RPC_URL';
-const usdcTokenAddress = '0x0000000000000000000000000000000000000000';
-const escrowContractAddress = '0x0000000000000000000000000000000000000000';
-
 class _TicTacToePageState extends State<TicTacToePage> {
   List<String> board = List.filled(9, '');
   String current = 'X';
   String status = 'X to move';
   bool gameOver = false;
   late final WalletService _walletService;
+  late final EscrowService _escrowService;
   bool _walletConnected = false;
   String _walletDisplay = 'Not connected';
   BigInt _nativeBalance = BigInt.zero;
@@ -53,8 +59,8 @@ class _TicTacToePageState extends State<TicTacToePage> {
   final TextEditingController _amountController = TextEditingController();
 
   // Firebase / online fields
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final DatabaseReference _db = FirebaseDatabase.instance.ref();
+  FirebaseAuth? _auth;
+  DatabaseReference? _db;
   StreamSubscription<DatabaseEvent>? _matchSub;
   DatabaseReference? _matchRef;
   String? _uid;
@@ -90,21 +96,36 @@ class _TicTacToePageState extends State<TicTacToePage> {
     _walletService = WalletService(
       rpcUrl: arcRpcUrl,
       usdcAddress: usdcTokenAddress,
+      escrowAddress: escrowContractAddress,
     );
     _walletService.init();
-    _ensureSignedIn();
+    _escrowService = EscrowService(
+      rpcUrl: arcRpcUrl,
+      escrowAddress: escrowContractAddress,
+      usdcAddress: usdcTokenAddress,
+    );
+    _escrowService.init();
+    // Initialize Firebase-dependent services only if Firebase was configured
+    if (Firebase.apps.isNotEmpty) {
+      _auth = FirebaseAuth.instance;
+      _db = FirebaseDatabase.instance.ref();
+      _ensureSignedIn();
+    } else {
+      debugPrint('Firebase not configured - running offline');
+    }
   }
 
   Future<void> _ensureSignedIn() async {
-    if (_auth.currentUser == null) {
-      final cred = await _auth.signInAnonymously();
+    if (_auth == null || _db == null) return;
+    if (_auth!.currentUser == null) {
+      final cred = await _auth!.signInAnonymously();
       _uid = cred.user?.uid;
     } else {
-      _uid = _auth.currentUser?.uid;
+      _uid = _auth!.currentUser?.uid;
     }
     // Ensure user record exists with default rating
     if (_uid != null) {
-      final userRef = _db.child('users/$_uid');
+      final userRef = _db!.child('users/$_uid');
       final snap = await userRef.get();
       if (!snap.exists) {
         await userRef.set({
@@ -120,12 +141,14 @@ class _TicTacToePageState extends State<TicTacToePage> {
   Future<void> _connectWallet() async {
     try {
       await _walletService.connect();
+      if (!mounted) return;
       setState(() {
         _walletConnected = _walletService.connected;
         _walletDisplay = _walletService.account?.hex ?? 'Connected';
       });
       await _refreshWalletBalances();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Wallet connect failed: $e')));
     }
@@ -159,12 +182,27 @@ class _TicTacToePageState extends State<TicTacToePage> {
     try {
       final txHash = await _walletService.approveToken(
           escrowContractAddress, BigInt.from(10).pow(6) * BigInt.from(100));
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Approve TX: $txHash')));
       await _refreshWalletBalances();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Approve failed: $e')));
+    }
+  }
+
+  Future<void> _buyUsdc() async {
+    try {
+      await _walletService.buyUsdc();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Opened Arc testnet faucet for USDC')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Buy USDC failed: $e')));
     }
   }
 
@@ -177,10 +215,12 @@ class _TicTacToePageState extends State<TicTacToePage> {
       }
       final amount = BigInt.from((double.parse(amountText) * 1e6).round());
       final txHash = await _walletService.transferToken(recipient, amount);
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Transfer TX: $txHash')));
       await _refreshWalletBalances();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Transfer failed: $e')));
     }
@@ -196,7 +236,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
 
   Future<int> _getMyRating() async {
     if (_uid == null) return 1200;
-    final snap = await _db.child('users/$_uid/rating').get();
+    final snap = await _db!.child('users/$_uid/rating').get();
     if (!snap.exists) return 1200;
     final val = snap.value;
     if (val is int) return val;
@@ -373,7 +413,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
                         hintText: '10.0',
                       ),
                       keyboardType:
-                          TextInputType.numberWithOptions(decimal: true),
+                          const TextInputType.numberWithOptions(decimal: true),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -392,6 +432,22 @@ class _TicTacToePageState extends State<TicTacToePage> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _buyUsdc,
+                            child: const Text('Buy USDC (Faucet)'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Need test USDC? Open the faucet and then refresh your wallet balances.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ],
                 ),
@@ -415,7 +471,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
                               Text('You ($_symbol)',
                                   style:
                                       Theme.of(context).textTheme.titleSmall),
-                              Text('Rating: ${_opponentRating}'),
+                              Text('Rating: $_opponentRating'),
                             ],
                           ),
                           Column(
@@ -503,12 +559,14 @@ class _TicTacToePageState extends State<TicTacToePage> {
                 ElevatedButton(onPressed: reset, child: const Text('Reset')),
                 ElevatedButton(
                     onPressed: () {
-                      // Placeholder: betting and Arc integration will be added later.
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text(
-                              'Blockchain betting integration: upcoming')));
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => BetFlowPage(
+                          walletService: _walletService,
+                          escrowService: _escrowService,
+                        ),
+                      ));
                     },
-                    child: const Text('Place Bet (Testnet)')),
+                    child: const Text('Open Betting Flow')),
               ],
             ),
             const SizedBox(height: 12),
@@ -553,6 +611,12 @@ class _TicTacToePageState extends State<TicTacToePage> {
   }
 
   Future<void> _startMatchmaking() async {
+    if (_db == null || _auth == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Firebase not configured')),
+      );
+      return;
+    }
     await _ensureSignedIn();
     setState(() {
       _isConnecting = true;
@@ -563,7 +627,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
       // Hardened matchmaking: transactionally join waiting matches using ELO and timeouts
       final myRating = await _getMyRating();
       final now = DateTime.now().millisecondsSinceEpoch;
-      final waitingSnap = await _db
+      final waitingSnap = await _db!
           .child('matches')
           .orderByChild('status')
           .equalTo('waiting')
@@ -580,7 +644,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
           if (expires < now) {
             // stale - try to remove it (creator may have left)
             try {
-              await _db.child('matches/$key').remove();
+              await _db!.child('matches/$key').remove();
             } catch (_) {}
             continue;
           }
@@ -592,7 +656,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
           // ELO window (±200)
           if ((p1Rating - myRating).abs() > 200) continue;
 
-          final ref = _db.child('matches/$key');
+          final ref = _db!.child('matches/$key');
           // transactional join
           try {
             final result = await ref.runTransaction((mutableData) {
@@ -602,8 +666,9 @@ class _TicTacToePageState extends State<TicTacToePage> {
               if (cur == null) return Transaction.abort();
               if (cur['player2'] != null) return Transaction.abort();
               final ex = (cur['expiresAt'] as int?) ?? 0;
-              if (ex < DateTime.now().millisecondsSinceEpoch)
+              if (ex < DateTime.now().millisecondsSinceEpoch) {
                 return Transaction.abort();
+              }
               cur['player2'] = _uid;
               cur['player2_rating'] = myRating;
               cur['status'] = 'playing';
@@ -634,8 +699,8 @@ class _TicTacToePageState extends State<TicTacToePage> {
       }
       if (!joined) {
         // create new match with expiry (timeout)
-        final ref = _db.child('matches').push();
-        final ttl = 30 * 1000; // 30 seconds
+        final ref = _db!.child('matches').push();
+        const ttl = 30 * 1000; // 30 seconds
         final matchData = {
           'player1': _uid,
           'player1_rating': myRating,
@@ -659,15 +724,17 @@ class _TicTacToePageState extends State<TicTacToePage> {
         _listenMatch();
       }
     } catch (e) {
-      setState(() {
-        _isConnecting = false;
-        _connectionStatus = 'Connection failed';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Matchmaking error: $e')),
-      );
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+          _connectionStatus = 'Connection failed';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Matchmaking error: $e')),
+        );
+      }
     }
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   void _startWaitCountdown() {
@@ -746,7 +813,7 @@ class _TicTacToePageState extends State<TicTacToePage> {
   }
 
   Future<int> _getRatingFor(String uid) async {
-    final snap = await _db.child('users/$uid/rating').get();
+    final snap = await _db!.child('users/$uid/rating').get();
     if (!snap.exists) return 1200;
     final val = snap.value;
     if (val is int) return val;
@@ -766,8 +833,9 @@ class _TicTacToePageState extends State<TicTacToePage> {
     final p1 = val['player1'] as String?;
     final p2 = val['player2'] as String?;
     final statusVal = val['status'] as String? ?? '';
-    if (p1 == null || p2 == null)
+    if (p1 == null || p2 == null) {
       return; // can't update ELO without two players
+    }
 
     double s1 = 0.5, s2 = 0.5;
     if (statusVal == 'Draw') {
@@ -802,16 +870,16 @@ class _TicTacToePageState extends State<TicTacToePage> {
     };
 
     try {
-      await _db.update(updates);
+      await _db!.update(updates);
       _eloUpdated = true;
     } catch (e) {
       // best-effort: set individually if multi-update fails
       if (_matchId != null) {
-        await _db.child('users/$p1/rating').set(new1);
-        await _db.child('users/$p2/rating').set(new2);
-        await _db.child('matches/$_matchId/result').set(statusVal);
-        await _db.child('matches/$_matchId/finalRatings/$p1').set(new1);
-        await _db.child('matches/$_matchId/finalRatings/$p2').set(new2);
+        await _db!.child('users/$p1/rating').set(new1);
+        await _db!.child('users/$p2/rating').set(new2);
+        await _db!.child('matches/$_matchId/result').set(statusVal);
+        await _db!.child('matches/$_matchId/finalRatings/$p1').set(new1);
+        await _db!.child('matches/$_matchId/finalRatings/$p2').set(new2);
       }
       _eloUpdated = true;
     }
